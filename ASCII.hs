@@ -1,3 +1,8 @@
+module ASCII (
+    bmpToASCII,
+    convertBMPFileToASCII
+    ) where
+
 import Util
 import BMP
 import qualified Data.ByteString.Lazy as BL
@@ -11,6 +16,7 @@ charIntensity = listArray (0,9) " .,:;ox%#@"
 pixelToChar :: Word8 -> Char
 pixelToChar x = charIntensity!(fromIntegral (255-x)*10`div`256)
 
+-- NOTE: currently assumes that colortable is filled 0-255
 bmpToASCII :: BMP -> [[Char]]
 bmpToASCII bmp = groupN w . reverse . map pixelToChar .  BL.unpack . imageData $ bmp
     where (w,_) = dimensionsBMP bmp
@@ -19,3 +25,4 @@ convertBMPFileToASCII :: FilePath -> FilePath -> IO ()
 convertBMPFileToASCII inFile outFile = do
     file <- BL.readFile inFile
     writeFile outFile $ unlines . bmpToASCII . readBMP $ file
+

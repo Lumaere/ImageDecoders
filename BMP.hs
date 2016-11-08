@@ -1,6 +1,6 @@
 module BMP (
-    FileHeader (..),
-    InfoHeader (..),
+    BMPFileHeader (..),
+    BMPInfoHeader (..),
     BMP (..),
     readBMP,
     writeBMP,
@@ -13,16 +13,15 @@ import Data.Binary
 import Data.Binary.Get (getWord16le, getWord32le)
 import Data.Binary.Put (putWord16le, putWord32le)
 import Data.Maybe (isNothing, fromJust)
-import Data.Array
 
-data FileHeader = FileHeader {
+data BMPFileHeader = FileHeader {
         bfType :: Word16,
         bfSize :: Word32,
         bfReserved1 :: Word16,
         bfReserved2 :: Word16,
         bfOffBits :: Word32} deriving Show
 
-instance Binary FileHeader where
+instance Binary BMPFileHeader where
     get = do
         btype <- getWord16le
         size <- getWord32le
@@ -42,10 +41,10 @@ instance Binary FileHeader where
         putWord16le $ bfReserved2 header
         putWord32le $ bfOffBits header
 
-sizeFileHeader :: Int
-sizeFileHeader = 14
+sizeBMPFileHeader :: Int
+sizeBMPFileHeader = 14
 
-data InfoHeader = InfoHeader {
+data BMPInfoHeader = InfoHeader {
         biSize :: Word32,
         biWidth :: Word32,
         biHeight :: Word32,
@@ -58,7 +57,7 @@ data InfoHeader = InfoHeader {
         biClrUsed :: Word32,
         biClrImportant :: Word32} deriving Show
 
-instance Binary InfoHeader where
+instance Binary BMPInfoHeader where
     get = do
         bSize <- getWord32le
         bWidth <- getWord32le
@@ -96,8 +95,8 @@ instance Binary InfoHeader where
         putWord32le $ biClrUsed header
         putWord32le $ biClrImportant header
 
-sizeInfoHeader :: Int
-sizeInfoHeader = 40
+sizeBMPInfoHeader :: Int
+sizeBMPInfoHeader = 40
 
 type Pixel = (Word8, Word8, Word8)
 data ColorTable = ColorTable {pixels :: [Pixel]} deriving Show
@@ -108,8 +107,8 @@ encodeCT :: ColorTable -> BL.ByteString
 encodeCT = BL.pack . foldr (++) [] . map (\(r,g,b) -> r:g:b:0:[]) . pixels
 
 data BMP = BMP {
-        bmpFileHeader :: FileHeader,
-        bmpInfoHeader :: InfoHeader,
+        bmpFileHeader :: BMPFileHeader,
+        bmpInfoHeader :: BMPInfoHeader,
         bmpColorTable :: Maybe ColorTable,
         imageData :: BL.ByteString} deriving Show
 
@@ -120,8 +119,8 @@ readBMP buf = BMP {
         bmpColorTable = colorTable,
         imageData = imageDat}
     where
-        (bufFileHead,rest1) = BL.splitAt (fromIntegral sizeFileHeader) buf
-        (bufInfoHead,rest2) = BL.splitAt (fromIntegral sizeInfoHeader) rest1
+        (bufFileHead,rest1) = BL.splitAt (fromIntegral sizeBMPFileHeader) buf
+        (bufInfoHead,rest2) = BL.splitAt (fromIntegral sizeBMPInfoHeader) rest1
         infoHead = decode bufInfoHead
         tableSize = (fromIntegral . (*4) . biClrUsed) infoHead
         colorTable = if biBitCount infoHead == 8 
