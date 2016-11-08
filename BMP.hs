@@ -3,6 +3,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary
 import Data.Binary.Get (getWord16le, getWord32le)
 import Data.Binary.Put (putWord16le, putWord32le)
+import Data.Maybe (isNothing, fromJust)
 
 data FileHeader = FileHeader {
         bfType :: Word16,
@@ -117,4 +118,11 @@ readBMP buf = BMP {
                      then Just $ decodeCT (BL.take tableSize rest2) else Nothing
         imageDat = if biBitCount infoHead == 8 
                    then BL.drop tableSize rest2 else rest2
+
+writeBMP :: BMP -> BL.ByteString
+writeBMP bmp = BL.append (BL.append header table) $ imageData bmp
+    where
+        header = BL.append (encode (bmpFileHeader bmp)) (encode (bmpInfoHeader bmp))
+        table = if isNothing $ bmpColorTable bmp 
+                then BL.empty else encodeCT $ fromJust $ bmpColorTable bmp
         
