@@ -1,9 +1,19 @@
+module BMP (
+    FileHeader (..),
+    InfoHeader (..),
+    BMP (..),
+    readBMP,
+    writeBMP,
+    dimensionsBMP
+    ) where
+
 import Util
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary
 import Data.Binary.Get (getWord16le, getWord32le)
 import Data.Binary.Put (putWord16le, putWord32le)
 import Data.Maybe (isNothing, fromJust)
+import Data.Array
 
 data FileHeader = FileHeader {
         bfType :: Word16,
@@ -125,4 +135,8 @@ writeBMP bmp = BL.append (BL.append header table) $ imageData bmp
         header = BL.append (encode (bmpFileHeader bmp)) (encode (bmpInfoHeader bmp))
         table = if isNothing $ bmpColorTable bmp 
                 then BL.empty else encodeCT $ fromJust $ bmpColorTable bmp
+
+dimensionsBMP :: BMP -> (Int, Int)
+dimensionsBMP bmp = (fromIntegral $ biWidth info, fromIntegral $ biHeight info)
+    where info = bmpInfoHeader bmp
         
