@@ -10,12 +10,17 @@ endif
 set shortmess=aoO
 badd +2 DCT.hs
 badd +1 Data.hs
-badd +7 Util.hs
-badd +6 BMP.hs
-badd +4 ASCII.hs
-badd +6469 tmp.hex
+badd +15 Util.hs
+badd +13 BMP.hs
+badd +37 ASCII.hs
+badd +1 tmp.hex\!
 badd +1 images/png/lion.png
-badd +47 PNG.hs
+badd +108 PNG.hs
+badd +39 tmp.txt
+badd +1 BMPInfoHeader.hs
+badd +1 BMPFileHeader.hs
+badd +7305 tmp.hex
+badd +1 images/png/bird.png
 argglobal
 silent! argdel *
 argadd DCT.hs
@@ -29,8 +34,8 @@ vsplit
 wincmd w
 wincmd t
 set winheight=1 winwidth=1
-exe 'vert 1resize ' . ((&columns * 81 + 80) / 160)
-exe 'vert 2resize ' . ((&columns * 78 + 80) / 160)
+exe 'vert 1resize ' . ((&columns * 91 + 84) / 168)
+exe 'vert 2resize ' . ((&columns * 76 + 84) / 168)
 argglobal
 edit PNG.hs
 setlocal fdm=manual
@@ -42,15 +47,15 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 57 - ((25 * winheight(0) + 21) / 42)
+let s:l = 127 - ((11 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-57
-normal! 020|
+127
+normal! 022|
 wincmd w
 argglobal
-edit tmp.hex
+edit ASCII.hs
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -60,7 +65,7 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 1 - ((0 * winheight(0) + 21) / 42)
+let s:l = 1 - ((0 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
@@ -68,8 +73,8 @@ normal! zt
 normal! 0
 wincmd w
 2wincmd w
-exe 'vert 1resize ' . ((&columns * 81 + 80) / 160)
-exe 'vert 2resize ' . ((&columns * 78 + 80) / 160)
+exe 'vert 1resize ' . ((&columns * 91 + 84) / 168)
+exe 'vert 2resize ' . ((&columns * 76 + 84) / 168)
 tabnext 1
 if exists('s:wipebuf')
   silent exe 'bwipe ' . s:wipebuf
