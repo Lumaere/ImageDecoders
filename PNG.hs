@@ -4,7 +4,7 @@ module PNG (
     PNG (..),
     readPNG,
     reconstruct,
-    getTmp,
+    getScanlines,
     ) where
 
 import Util
@@ -137,7 +137,10 @@ reconstruct ms wss = reverse $ foldl' (flip defilt) [] $ zip ms wss
                 (f,b) = splitAt 3 c
                 front = zipWith (+) f $ zipWith avg [0,0,0] (take 3 (head rs))
                 back = zipWith (+) b $ zipWith avg r (drop 3 (head rs))
-                avg = \a b -> (a + b) `div` 2
+                avg :: Word8 -> Word8 -> Word8
+                avg a b = fromIntegral $ (a' + b') `div` 2
+                    where a' = fromIntegral a :: Int
+                          b' = fromIntegral b :: Int
         defilt (4,c) rs = r:rs
             where
                 r = front ++ back
@@ -155,8 +158,8 @@ reconstruct ms wss = reverse $ foldl' (flip defilt) [] $ zip ms wss
                         p = a' + b' - c'
         defilt (_,_) _ = error "Unhandled filter type"
 
-getTmp :: PNG -> ([Word8],[[Word8]])
-getTmp xs = (frst,scnd)
+getScanlines :: PNG -> ([Word8],[[Word8]])
+getScanlines xs = (frst,scnd)
     where
         w = fromIntegral . (+1) . (*3) . width . pngInfoHeader $ xs
         h = fromIntegral . height . pngInfoHeader $ xs
@@ -175,8 +178,8 @@ readPNG :: BL.ByteString -> PNG
 readPNG buf = PNG {
         pngFileHeader = decode fileHead,
         pngInfoHeader = decode $ chunkData $ chunks!!0, -- IHDR is first
-        pngImageData = Z.decompress . BL.concat . map chunkData $ 
-                        filter ((== pngIDAT) . datType) chunks }
+        pngImageData = Z.decompress . BL.concat . map chunkData . 
+                        filter ((== pngIDAT) . datType) $ chunks }
     where
         (fileHead,rest) = BL.splitAt (fromIntegral sizePNGFileHeader) buf
         chunks = decodePNGChunks rest

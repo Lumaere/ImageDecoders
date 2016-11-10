@@ -1,6 +1,8 @@
 module ASCII (
     bmpToASCII,
-    convertBMPFileToASCII
+    convertBMPFileToASCII,
+    pngToASCII,
+    convertPNGFileToASCII,
     ) where
 
 import Util
@@ -28,7 +30,7 @@ convertBMPFileToASCII inFile outFile = do
     writeFile outFile $ unlines . bmpToASCII . readBMP $ file
 
 pngToASCII :: PNG -> [[Char]]
-pngToASCII png = let (f,dat) = getTmp png in
+pngToASCII png = let (f,dat) = getScanlines png in
                     map (everyN 3) . map (map pixelToChar) $ reconstruct f dat
 
 convertPNGFileToASCII :: FilePath -> FilePath -> IO ()

@@ -26,7 +26,7 @@ silent! argdel *
 argadd DCT.hs
 argadd Util.hs
 argadd Data.hs
-edit PNG.hs
+edit ASCII.hs
 set splitbelow splitright
 wincmd _ | wincmd |
 vsplit
@@ -34,26 +34,8 @@ vsplit
 wincmd w
 wincmd t
 set winheight=1 winwidth=1
-exe 'vert 1resize ' . ((&columns * 91 + 84) / 168)
-exe 'vert 2resize ' . ((&columns * 76 + 84) / 168)
-argglobal
-edit PNG.hs
-setlocal fdm=manual
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=#
-setlocal fdl=0
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-silent! normal! zE
-let s:l = 127 - ((11 * winheight(0) + 21) / 43)
-if s:l < 1 | let s:l = 1 | endif
-exe s:l
-normal! zt
-127
-normal! 022|
-wincmd w
+exe 'vert 1resize ' . ((&columns * 76 + 84) / 168)
+exe 'vert 2resize ' . ((&columns * 91 + 84) / 168)
 argglobal
 edit ASCII.hs
 setlocal fdm=manual
@@ -65,16 +47,34 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 1 - ((0 * winheight(0) + 21) / 43)
+let s:l = 5 - ((4 * winheight(0) + 22) / 44)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-1
-normal! 0
+5
+normal! 026|
+wincmd w
+argglobal
+edit PNG.hs
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+silent! normal! zE
+let s:l = 183 - ((39 * winheight(0) + 22) / 44)
+if s:l < 1 | let s:l = 1 | endif
+exe s:l
+normal! zt
+183
+normal! 05|
 wincmd w
 2wincmd w
-exe 'vert 1resize ' . ((&columns * 91 + 84) / 168)
-exe 'vert 2resize ' . ((&columns * 76 + 84) / 168)
+exe 'vert 1resize ' . ((&columns * 76 + 84) / 168)
+exe 'vert 2resize ' . ((&columns * 91 + 84) / 168)
 tabnext 1
 if exists('s:wipebuf')
   silent exe 'bwipe ' . s:wipebuf
