@@ -20,8 +20,8 @@ badd +1 images/png/bird.png
 badd +37 tmp.hex
 badd +1 images/jpg/mini.jpg
 badd +176 JPEG.hs
-badd +11 HuffmanTree.hs
-badd +1 Huffman.hs
+badd +30 HuffmanTree.hs
+badd +0 JPEGMetaData.hs
 argglobal
 silent! argdel *
 argadd DCT.hs
@@ -48,15 +48,15 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 208 - ((1 * winheight(0) + 17) / 34)
+let s:l = 13 - ((12 * winheight(0) + 17) / 34)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-208
-normal! 014|
+13
+normal! 0
 wincmd w
 argglobal
-edit HuffmanTree.hs
+edit JPEGMetaData.hs
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -66,14 +66,13 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 1 - ((0 * winheight(0) + 17) / 34)
+let s:l = 6 - ((5 * winheight(0) + 17) / 34)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-1
-normal! 0
+6
+normal! 020|
 wincmd w
-2wincmd w
 exe 'vert 1resize ' . ((&columns * 107 + 90) / 181)
 exe 'vert 2resize ' . ((&columns * 73 + 90) / 181)
 tabnext 1
