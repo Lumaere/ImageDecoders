@@ -1,4 +1,6 @@
-import Data (gray1)
+module DCT (
+    decode
+    ) where
 
 shift :: Int -> [[Int]] -> [[Int]]
 shift s = map (map (\x -> x - s))
@@ -78,8 +80,8 @@ unzigzag arr = let frnt = build arr
                   prev = s * (s + 1) `div` 2
                   diff = s - y
 
-revQuantize :: [[Int]] -> [[Int]]
-revQuantize = map (map freqInc) . zip2D quantMatrix
+revQuantize :: [[Double]] -> [[Int]] -> [[Int]]
+revQuantize qnt = map (map freqInc) . zip2D qnt
     where freqInc (q,g) = round q * g -- q should round to correct int
 
 dctInverse :: [[Int]] -> [[Int]]
@@ -94,8 +96,8 @@ dctInverse f = [[round (transform x y) | x <- [0..7]] | y <- [0..7]]
                                 b' = fromIntegral b in
                                 cos ((2 * a' + 1) * b' * pi / 16)
 
-decode :: (Int,[((Int,Int),Maybe Int)]) -> [[Int]]
-decode = shift (-128) . dctInverse . revQuantize . unzigzag . revHuffman
+decode :: [[Double]] -> [Int] -> [[Int]]
+decode qnt = shift (-128) . dctInverse . revQuantize qnt . unzigzag
 
 avgError :: [[Int]] -> [[Int]] -> Double
 avgError xss yss = fromIntegral tot / 64
