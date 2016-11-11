@@ -4,6 +4,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary
 import Data.Binary.Get (getWord16be, getWord32be, runGet)
 import Data.Binary.Put (putWord16be, putWord32be)
+import Data.Bits
 
 data JPEGFileHeader = JPEGFileHeader {
         hSOI :: Word16,
@@ -18,7 +19,7 @@ data JPEGFileHeader = JPEGFileHeader {
         hThumbnailHeight :: Word8 } deriving Show
 
 sizeJPEGFileHeader :: Int
-sizeJPEGFileHeader = 20
+sizeJPEGFileHeader = 18
 
 instance Binary JPEGFileHeader where
     get = do
@@ -57,18 +58,6 @@ instance Binary JPEGFileHeader where
         putWord8    $ hThumbnailWidth header
         putWord8    $ hThumbnailHeight header
 
--- SOI       0xFF, 0xD8              none            Start Of Image
--- SOF0      0xFF, 0xC0              variable size   Start Of Frame (baseline DCT)       Indicates that this is a baseline DCT-based JPEG, and specifies the width, height, number of components, and component subsampling (e.g., 4:2:0).
--- SOF2      0xFF, 0xC2              variable size   Start Of Frame (progressive DCT)    Indicates that this is a progressive DCT-based JPEG, and specifies the width, height, number of components, and component subsampling (e.g., 4:2:0).
--- DHT       0xFF, 0xC4              variable size   Define Huffman Table(s)             Specifies one or more Huffman tables.
--- DQT       0xFF, 0xDB              variable size   Define Quantization Table(s)        Specifies one or more quantization tables.
--- DRI       0xFF, 0xDD              4 bytes         Define Restart Interval             Specifies the interval between RSTn markers, in macroblocks. This marker is followed by two bytes indicating the fixed size so it can be treated like any other variable size segment.
--- SOS       0xFF, 0xDA              variable size   Start Of Scan                       Begins a top-to-bottom scan of the image. In baseline DCT JPEG images, there is generally a single scan. Progressive DCT JPEG images usually contain multiple scans. This marker specifies which slice of data it will contain, and is immediately followed by entropy-coded data.
--- RSTn      0xFF, 0xDn (n=0..7)     none            Restart                             Inserted every r macroblocks, where r is the restart interval set by a DRI marker. Not used if there was no DRI marker. The low three bits of the marker code cycle in value from 0 to 7.
--- APPn      0xFF, 0xEn              variable size   Application-specific                For example, an Exif JPEG file uses an APP1 marker to store metadata, laid out in a structure based closely on TIFF.
--- COM       0xFF, 0xFE              variable size   Comment                             Contains a text comment.
--- EOI       0xFF, 0xD9              none            End Of Image
-
 data FrameComponent = FrameComponent {
         fcID :: Word8,
         fcVertHorz :: Word8,
@@ -87,17 +76,6 @@ instance Binary FrameComponent where
         putWord8 $ fcID header
         putWord8 $ fcVertHorz header
         putWord8 $ fcQuantNum header
-
--- Finally figured out how to do serialization of lists
-getMany :: Binary a => Int -> Get [a]
-getMany n = rec [] n
-    where 
-        rec xs 0 = return $ reverse xs
-        rec xs i = do x <- get
-                      x `seq` rec (x:xs) (i-1)
-
-putMany :: Binary a => [a] -> Put
-putMany = mapM_ put
 
 data FrameInfo = FrameInfo {
         sofLength :: Word16,
@@ -130,22 +108,132 @@ instance Binary FrameInfo where
         putWord8    $ sofCompNum header
         putMany     $ sofComps header
 
-        
--- decodeSOF0 :: BL.ByteString -> FrameInfo
+data QuantTable = QuantTable {
+        qtLength :: Word16,
+        qtNum :: Word8,
+        qtPrec :: Word8,
+        table :: [[Word8]] } deriving Show
+instance Binary QuantTable where
+    get = do
+        len <- getWord16be
+        info <- getWord8
+        let prec = info .&. 0xF0
+        arr <- getMany $ 64 * (fromIntegral prec + 1)
+        return QuantTable {
+            qtLength = len,
+            qtNum = info .&. 0x0F,
+            qtPrec = info .&. 0xF0,
+            table = groupN 8 arr }
 
+    put qnt = do
+        putWord16be $ qtLength qnt
+        putWord8    $ qtNum qnt .|. qtPrec qnt
+        putMany     $ foldr (++) [] . table $ qnt
 
-decodeQuant :: BL.ByteString -> [[Double]]
-decodeQuant buf = groupN 8 . map fromIntegral . BL.unpack $ table
-    where 
-        size = fromIntegral . runGet getWord16be $ bufSize
-        num = fromIntegral . runGet getWord8 $ bufNum
-        (bufSize,rest1) = BL.splitAt 2 . BL.drop 2 $ buf
-        (bufNum,table) = BL.splitAt 1 rest1
+data HuffmanTable = HuffmanTable {
+        htLength :: Word16,
+        htNum :: Word8,
+        htType :: Word8,
+        htNumSymbols :: [Word8],
+        htSymbols :: [Word8] } deriving Show
+instance Binary HuffmanTable where
+    get = do
+        len <- getWord16be
+        info <- getWord8
+        cnts <- getMany 16 :: Get [Word8]
+        let n = fromIntegral $ sum cnts
+        arr <- getMany n
+        return HuffmanTable {
+            htLength = len,
+            htNum = info .&. 0xF,
+            htType = shift info (-4),
+            htNumSymbols = cnts,
+            htSymbols = arr }
 
-tmp1 :: BL.ByteString -> FrameInfo
-tmp1 buf = decode . BL.drop 2 $ rst3
-    where
-        (_,rst) = BL.splitAt (fromIntegral sizeJPEGFileHeader) buf
-        (q1,rst2) = BL.splitAt 69 rst
-        (q2,rst3) = BL.splitAt 69 rst2
+    put hft = do
+        putWord16be $ htLength hft
+        putWord8    $ shift (htType hft) 4 .|. htNum hft
+        putMany     $ htNumSymbols hft
+        putMany     $ htSymbols hft
+
+data ScanMarker = ScanMarker {
+        sosLength :: Word16,
+        sosNumComp :: Word8,
+        sosComponents :: [(Word8,Word8)] } deriving Show
+instance Binary ScanMarker where
+    get = do
+        len <- getWord16be
+        num <- getWord8
+        comps <- getMany $ fromIntegral num
+        _ <- getWord8  -- skip 3 bytes
+        _ <- getWord8 
+        _ <- getWord8 
+        return ScanMarker {
+            sosLength = len,
+            sosNumComp = num,
+            sosComponents = comps }
+    
+    put sos = do
+        putWord16be $ sosLength sos
+        putWord8    $ sosNumComp sos
+        putMany     $ sosComponents sos
+        putWord8    $ 0 -- put 3 bytes back
+        putWord8    $ 0
+        putWord8    $ 0
+
+data JPEG = JPEG {
+        fileHeader :: JPEGFileHeader,
+        infoHeader :: FrameInfo,
+        quantTables :: [QuantTable],
+        huffmanTables :: [HuffmanTable],
+        scanInfo :: ScanMarker,
+        imageData :: BL.ByteString }
+
+data Segment = Seg1 JPEGFileHeader
+             | Seg2 FrameInfo
+             | Seg3 QuantTable
+             | Seg4 HuffmanTable 
+             | Seg5 ScanMarker
+             deriving Show
+
+-- readJPEG :: BL.ByteString -> JPEG
+-- readJPEG buf = JPEG {
+--         fileHeader = 
+
+data HuffmanTree = Leaf (Maybe Word16)
+                 | Branch HuffmanTree HuffmanTree
+                 deriving Show
+
+duplicateVals :: (Integral a) => [a] -> [a]
+duplicateVals = foldr ((++) . (\x -> take (fromIntegral x) $ repeat x)) []
+
+duplicateIdxs :: (Integral a) => [a] -> [a]
+duplicateIdxs vals = foldr dup [] (zip [1..] vals)
+    where dup (i,x) ls = take (fromIntegral x) (repeat i) ++ ls
+
+buildHuffmanTree :: Int -> [(Word16,Word16)] -> (HuffmanTree,[(Word16,Word16)])
+buildHuffmanTree _ [] = (Leaf Nothing, [])
+buildHuffmanTree d ys@(x:xs) = 
+    if fst x == fromIntegral d then (Leaf . Just . snd $ x, xs) 
+                  else let (l,rst) = buildHuffmanTree (d+1) ys 
+                           (r,rst2) = buildHuffmanTree (d+1) rst 
+                       in (Branch l r, rst2)
+
+readTmp :: BL.ByteString -> [Segment]
+-- readTmp empty = []
+readTmp buf
+  | marker == 0xFFD8 = let x = decode buf in Seg1 x : readTmp (BL.drop 20 buf)
+  | marker == 0xFFC0 = let x = decode $ BL.drop 2 buf in Seg2 x : readTmp (BL.drop (2 + fromIntegral (sofLength x)) buf)
+  | marker == 0xFFDB = let x = decode $ BL.drop 2 buf in Seg3 x : readTmp (BL.drop (2 + fromIntegral (qtLength x)) buf)
+  | marker == 0xFFC4 = let x = decode $ BL.drop 2 buf in Seg4 x : readTmp (BL.drop (2 + fromIntegral (htLength x)) buf)
+  | marker == 0xFFDA = let x = decode $ BL.drop 2 buf in Seg5 x : readTmp (BL.drop (2 + fromIntegral (sosLength x)) buf)
+  | otherwise = []
+  where marker = runGet getWord16be buf
+
+tmpData :: BL.ByteString -> BL.ByteString
+tmpData buf = BL.take (BL.length xs - 2) xs
+    where xs = BL.drop 0x193 buf
+
+cs = [0,1,3,2,3,5,6,3,4,7,5,4,5,9,9,0] :: [Word16]
+hs = [1,0,2,3,4,17,5,18,33,6,19,49,65,81,7,34,97,113,129,145,20,50,161,35,66,82,177,83,98,114,130,146,193,209,8,21,51,225,240,36,67,148,162,22,84,99,147,241,23,37,52,68,69,86,115,116,132,24,54,70,100,131,164,178,194,210] :: [Word16]
 

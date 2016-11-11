@@ -37,7 +37,7 @@ readBMP buf = BMP {
         (bufFileHead,rest1) = BL.splitAt (fromIntegral sizeBMPFileHeader) buf
         (bufInfoHead,rest2) = BL.splitAt (fromIntegral sizeBMPInfoHeader) rest1
         infoHead = decode bufInfoHead
-        tableSize = (fromIntegral . (*4) . dibClrUsed . getBaseInfo) infoHead
+        tableSize = fromIntegral . (*4) . dibClrUsed . getBaseInfo $ infoHead
         bitCount = dibBitCount $ getBaseInfo infoHead
         colorTable = if bitCount == 8 
                      then Just $ decodeCT (BL.take tableSize rest2) else Nothing

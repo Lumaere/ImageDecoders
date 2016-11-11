@@ -8,18 +8,19 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +18 DCT.hs
+badd +58 DCT.hs
 badd +1 Data.hs
-badd +15 Util.hs
-badd +56 BMP.hs
+badd +11 Util.hs
+badd +40 BMP.hs
 badd +44 ASCII.hs
 badd +9 PNG.hs
-badd +88 BMPInfoHeader.hs
+badd +21 BMPInfoHeader.hs
 badd +1 BMPFileHeader.hs
 badd +1 images/png/bird.png
-badd +23 tmp.hex
+badd +26 tmp.hex
 badd +1 images/jpg/mini.jpg
-badd +72 JPEG.hs
+badd +176 JPEG.hs
+badd +1 images/jpg/huff_simple0.jpg
 argglobal
 silent! argdel *
 argadd DCT.hs
@@ -33,8 +34,8 @@ vsplit
 wincmd w
 wincmd t
 set winheight=1 winwidth=1
-exe 'vert 1resize ' . ((&columns * 81 + 78) / 156)
-exe 'vert 2resize ' . ((&columns * 74 + 78) / 156)
+exe 'vert 1resize ' . ((&columns * 100 + 87) / 175)
+exe 'vert 2resize ' . ((&columns * 74 + 87) / 175)
 argglobal
 edit JPEG.hs
 setlocal fdm=manual
@@ -46,12 +47,12 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 127 - ((38 * winheight(0) + 21) / 43)
+let s:l = 172 - ((29 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-127
-normal! 013|
+172
+normal! 0
 wincmd w
 argglobal
 edit tmp.hex
@@ -64,15 +65,15 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 10 - ((9 * winheight(0) + 21) / 43)
+let s:l = 27 - ((22 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-10
-normal! 034|
+27
+normal! 0
 wincmd w
-exe 'vert 1resize ' . ((&columns * 81 + 78) / 156)
-exe 'vert 2resize ' . ((&columns * 74 + 78) / 156)
+exe 'vert 1resize ' . ((&columns * 100 + 87) / 175)
+exe 'vert 2resize ' . ((&columns * 74 + 87) / 175)
 tabnext 1
 if exists('s:wipebuf')
   silent exe 'bwipe ' . s:wipebuf
