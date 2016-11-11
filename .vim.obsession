@@ -12,16 +12,17 @@ badd +106 DCT.hs
 badd +1 Data.hs
 badd +10 Util.hs
 badd +40 BMP.hs
-badd +44 ASCII.hs
+badd +37 ASCII.hs
 badd +9 PNG.hs
 badd +21 BMPInfoHeader.hs
 badd +1 BMPFileHeader.hs
 badd +1 images/png/bird.png
-badd +37 tmp.hex
+badd +26 tmp.hex
 badd +1 images/jpg/mini.jpg
 badd +176 JPEG.hs
 badd +30 HuffmanTree.hs
-badd +0 JPEGMetaData.hs
+badd +3 JPEGMetaData.hs
+badd +267 tmp.txt
 argglobal
 silent! argdel *
 argadd DCT.hs
@@ -31,12 +32,16 @@ edit JPEG.hs
 set splitbelow splitright
 wincmd _ | wincmd |
 vsplit
-1wincmd h
+wincmd _ | wincmd |
+vsplit
+2wincmd h
+wincmd w
 wincmd w
 wincmd t
 set winheight=1 winwidth=1
-exe 'vert 1resize ' . ((&columns * 107 + 90) / 181)
-exe 'vert 2resize ' . ((&columns * 73 + 90) / 181)
+exe 'vert 1resize ' . ((&columns * 105 + 136) / 272)
+exe 'vert 2resize ' . ((&columns * 90 + 136) / 272)
+exe 'vert 3resize ' . ((&columns * 75 + 136) / 272)
 argglobal
 edit JPEG.hs
 setlocal fdm=manual
@@ -48,15 +53,15 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 13 - ((12 * winheight(0) + 17) / 34)
+let s:l = 155 - ((41 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-13
+155
 normal! 0
 wincmd w
 argglobal
-edit JPEGMetaData.hs
+edit DCT.hs
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -66,15 +71,34 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-let s:l = 6 - ((5 * winheight(0) + 17) / 34)
+let s:l = 79 - ((22 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-6
-normal! 020|
+79
+normal! 0
 wincmd w
-exe 'vert 1resize ' . ((&columns * 107 + 90) / 181)
-exe 'vert 2resize ' . ((&columns * 73 + 90) / 181)
+argglobal
+edit tmp.hex
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+silent! normal! zE
+let s:l = 26 - ((21 * winheight(0) + 21) / 43)
+if s:l < 1 | let s:l = 1 | endif
+exe s:l
+normal! zt
+26
+normal! 0
+wincmd w
+exe 'vert 1resize ' . ((&columns * 105 + 136) / 272)
+exe 'vert 2resize ' . ((&columns * 90 + 136) / 272)
+exe 'vert 3resize ' . ((&columns * 75 + 136) / 272)
 tabnext 1
 if exists('s:wipebuf')
   silent exe 'bwipe ' . s:wipebuf

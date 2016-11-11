@@ -1,5 +1,6 @@
 
-import Util (getMany, putMany, duplicateIdxs, toBits, roll, groupN, everyN)
+import Data.Array
+import Util (groupN, duplicateIdxs, roll, toTuple)
 import HuffmanTree (HuffmanTree, buildHuffmanTree, huffmanTreeLookup)
 import JPEGMetaData
 import qualified DCT as D (decode)
@@ -9,7 +10,21 @@ import Data.Binary (decode, Word16, Word8)
 import Data.Binary.Get (getWord16be, runGet)
 import Data.Bits ((.&.), (.|.), shift, shiftR)
 import Data.List (foldl')
+import Data.Maybe (fromJust)
 import Debug.Trace
+import GHC.Int (Int64)
+
+toBits :: BL.ByteString -> [Word8]
+toBits = foldr (++) [] . map (\x -> split x) . removeStuffed . BL.unpack
+    where 
+        split x = [shift x y .&. 0x01 | y <- [-7..0]]
+        removeStuffed :: [Word8] -> [Word8]
+        removeStuffed [] = []
+        removeStuffed [x] = [x]
+        removeStuffed (x:y:xs)
+          | x == 0xff && y == 0x00 = x : removeStuffed xs
+          | x == 0xff = if y == 0xD9 then [] else error "Bad data stream"
+          | otherwise = x : removeStuffed (y:xs)
 
 data JPEG = JPEG {
         fileHeader :: JPEGFileHeader,
@@ -52,13 +67,23 @@ updateJPEG seg state = case seg of
     Seg6 x -> state { imageData = x }
     
 
+-- apparently haskell doesnt like 2 + fromIntegral ...
+getLength :: Segment -> Int64
+getLength xx = case xx of
+    Seg1 x -> 20
+    Seg2 x -> (+2) . fromIntegral $ sofLength x
+    Seg3 x -> (+2) . fromIntegral $ qtLength x
+    Seg4 x -> (+2) . fromIntegral $ htLength x
+    Seg5 x -> (+2) . fromIntegral $ sosLength x
+    _      -> error "Undefined segment length"
+
 readSegments :: BL.ByteString -> [Segment]
 readSegments buf
-  | marker == 0xFFD8 = let x = decode buf in Seg1 x : readSegments (BL.drop 20 buf)
-  | marker == 0xFFC0 = let x = decode buf in Seg2 x : readSegments (BL.drop (2 + fromIntegral (sofLength x)) buf)
-  | marker == 0xFFDB = let x = decode buf in Seg3 x : readSegments (BL.drop (2 + fromIntegral (qtLength x)) buf)
-  | marker == 0xFFC4 = let x = decode buf in Seg4 x : readSegments (BL.drop (2 + fromIntegral (htLength x)) buf)
-  | marker == 0xFFDA = let x = decode buf in Seg5 x : Seg6 (BL.drop (2 + fromIntegral (sosLength x)) buf) : []
+  | marker == 0xFFD8 = let x = Seg1 $ decode buf in x : readSegments (BL.drop (getLength x) buf)
+  | marker == 0xFFC0 = let x = Seg2 $ decode buf in x : readSegments (BL.drop (getLength x) buf)
+  | marker == 0xFFDB = let x = Seg3 $ decode buf in x : readSegments (BL.drop (getLength x) buf)
+  | marker == 0xFFC4 = let x = Seg4 $ decode buf in x : readSegments (BL.drop (getLength x) buf)
+  | marker == 0xFFDA = let x = Seg5 $ decode buf in x : Seg6 (BL.drop (getLength x) buf) : []
   | otherwise = error "Unhandled segment type"
   where marker = runGet getWord16be buf
 
@@ -88,13 +113,45 @@ decodeACValues hf xs = let (ac, rest) = rec xs [] 63
                 (run, sz) = (fromIntegral $ inf `shift` (-4), fromIntegral $ inf .&. 0xF)
                 (numBits, cont) = splitAt sz rst
 
-cs = [0,1,5,1,1,1,1,0,0,0,0,0,0,0,0,0] :: [Word16]
-hs = [2,0,1,3,4,5,6,7,8,9] :: [Word16]
-hf = buildHuffmanTree $ zip (duplicateIdxs cs) hs
+roundUp8 :: Int -> Int
+roundUp8 x = 1 + (x - 1) `div` 8
 
-qnt = [[5,3,4,4,4,3,5,4],[4,4,5,5,5,6,7,12],[8,7,7,7,7,15,11,11],[9,12,17,15,18,18,17,15],[17,17,19,22,28,23,19,20],[26,21,17,17,24,33,24,26],[29,29,31,31,31,19,23,34],[36,34,30,36,28,30,31,30]] :: [[Double]]
+decodeJPEG :: BL.ByteString -> [([[Int]],[[Int]],[[Int]])]
+decodeJPEG buf = map toTuple [rec 0 [] . toBits . imageData $ jpeg | x <- [1..blockCnt]]
+    where 
+        jpeg = readJPEG buf
+        blockCnt = 
+            let blocksX = roundUp8 . fromIntegral . sofWidth . infoHeader $ jpeg
+                blocksY = roundUp8 . fromIntegral . sofHeight . infoHeader $ jpeg
+            in blocksX * blocksY :: Int
+        rec :: Int -> [[[Int]]] -> [Word8] -> [[[Int]]]
+        rec 3 acc _   = reverse acc
+        rec c acc stm = rec (c+1) (D.decode tab (dc:ac) : acc) rst
+            where
+                (_,x) = (sosComponents . scanInfo $ jpeg) !! c
+                (acT,dcT) = (fromIntegral $ x .&. 0xF, fromIntegral $ x `shiftR` 4)
+                (dc,tmp) = decodeDCValue (fromJust $ M.lookup (0,dcT) (huffmanTrees jpeg)) stm
+                (ac,rst) = decodeACValues (fromJust $ M.lookup (1,acT) (huffmanTrees jpeg)) tmp
+                Just tab = M.lookup (fromIntegral $ fcQuantNum ((sofComps . infoHeader $ jpeg) !! c)) (quantTables jpeg)
 
-cs2 = [0,1,3,2,3,5,6,3,4,7,5,4,5,9,9,0] :: [Word16]
-hs2 = [1,0,2,3,4,17,5,18,33,6,19,49,65,81,7,34,97,113,129,145,20,50,161,35,66,82,177,83,98,114,130,146,193,209,8,21,51,225,240,36,67,148,162,22,84,99,147,241,23,37,52,68,69,86,115,116,132,24,54,70,100,131,164,178,194,210] :: [Word16]
-hf2 = buildHuffmanTree $ zip (duplicateIdxs cs2) hs2
+charIntensity :: Array Int Char
+charIntensity = listArray (0,9) " .,:;xo%#@"
+
+pixelToChar :: Word8 -> Char
+pixelToChar x = charIntensity!(fromIntegral (255-x)*10`div`256)
+
+tmpOut :: BL.ByteString -> [[Char]]
+tmpOut buf = map (map (pixelToChar . fromIntegral)) lums
+    where
+        jpeg = readJPEG buf
+        w = fromIntegral . sofWidth . infoHeader $ jpeg
+        h = fromIntegral . sofHeight . infoHeader $ jpeg
+        blocksX = roundUp8 w
+        blocksY = roundUp8 h
+        arr = groupN blocksX . take (blocksX * blocksY) . cycle . 
+                map (\(a,_,_) -> a) $ decodeJPEG buf
+
+        lums = map (take w) . take h . foldr (++) [] $ map merge arr
+        merge :: [[[a]]] -> [[a]]
+        merge xs = [foldr (++) [] $ map (!!i) xs | i <- [0..7]]
 

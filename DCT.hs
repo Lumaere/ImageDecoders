@@ -60,14 +60,6 @@ huffman b = (dc, compress 1 0 ac)
 encode :: [[Int]] -> (Int,[((Int,Int),Maybe Int)])
 encode = huffman . zigzag . quantize . dctConversion . shift 128
 
-revHuffman :: (Int,[((Int,Int),Maybe Int)]) -> [Int]
-revHuffman (dc,xs) = let frnt = dc : expand xs in frnt ++ take (64 - length frnt) (repeat 0)
-    where
-        expand :: [((Int,Int),Maybe Int)] -> [Int]
-        expand [(_,Nothing)] = []
-        expand (((len,_),(Just amp)):ys) = take len (repeat 0) ++ [amp] ++ expand ys
-
--- TODO: finish implementing this function
 unzigzag :: [Int] -> [[Int]]
 unzigzag arr = let frnt = build arr
                    back = build $ reverse arr in
@@ -91,7 +83,8 @@ dctInverse f = [[round (transform x y) | x <- [0..7]] | y <- [0..7]]
         transform x y = 1/4 * (sum [calc u v | u <- [0..7], v <- [0..7]])
             where
                 alph u = if u == 0 then 1 / (sqrt 2) else 1
-                calc u v = alph u * alph v * fromIntegral (f !! v !! u) * calc' x u * calc' y v
+                calc u v = alph u * alph v * fromIntegral (f !! v !! u) * 
+                             calc' x u * calc' y v
                 calc' a b = let a' = fromIntegral a 
                                 b' = fromIntegral b in
                                 cos ((2 * a' + 1) * b' * pi / 16)

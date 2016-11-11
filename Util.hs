@@ -6,8 +6,8 @@ module Util (
     putMany,
     duplicateVals,
     duplicateIdxs,
-    toBits,
     roll,
+    toTuple,
     ) where
 
 import Data.Char (ord)
@@ -47,18 +47,11 @@ duplicateIdxs :: (Integral a) => [a] -> [a]
 duplicateIdxs vals = foldr dup [] (zip [1..] vals)
     where dup (i,x) ls = take (fromIntegral x) (repeat i) ++ ls
 
-toBits :: BL.ByteString -> [Word8]
-toBits = foldr (\x acc -> split x ++ acc) [] . removeStuffed . BL.unpack
-    where 
-        split x = [shift x y .&. 0x01 | y <- [-7..0]]
-        removeStuffed [] = []
-        removeStuffed [x] = [x]
-        removeStuffed (x:y:xs)
-          | x == 0xff = if y /= 0x00 then error "Bad stream"
-                                     else x : removeStuffed xs
-          | otherwise = removeStuffed (y:xs)
-
 roll :: [Word8] -> Int
 roll = foldl' (\b a -> b `shift` 1 .|. fromIntegral a) 0
+
+toTuple :: [a] -> (a,a,a)
+toTuple (g:h:c:[]) = (g,h,c)
+toTuple _ = error "Bad tuple call"
 
 

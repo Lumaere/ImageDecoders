@@ -1,5 +1,6 @@
 module JPEGMetaData (
     JPEGFileHeader (..),
+    FrameComponent (..),
     FrameInfo (..),
     QuantTable (..),
     HuffmanTable (..),
