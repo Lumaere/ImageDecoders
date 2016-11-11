@@ -30,8 +30,12 @@ convertBMPFileToASCII inFile outFile = do
     writeFile outFile $ unlines . bmpToASCII . readBMP $ file
 
 pngToASCII :: PNG -> [[Char]]
-pngToASCII png = let (f,dat) = getScanlines png in
-                    map (everyN 3) . map (map pixelToChar) $ reconstruct f dat
+pngToASCII png = let s = case colourType . pngInfoHeader $ png of
+                            2 -> 3
+                            6 -> 4
+                            _ -> error "Unhandled image type"
+                     w = fromIntegral . width . pngInfoHeader $ png
+                 in groupN w . map pixelToChar . everyN s . BL.unpack . pngImageData $ png
 
 convertPNGFileToASCII :: FilePath -> FilePath -> IO ()
 convertPNGFileToASCII inFile outFile = do

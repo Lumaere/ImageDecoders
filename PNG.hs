@@ -3,8 +3,6 @@ module PNG (
     IHDR (..),
     PNG (..),
     readPNG,
-    reconstruct,
-    getScanlines,
     ) where
 
 import Util
@@ -97,46 +95,47 @@ pngIEND = fromIntegral . strAscii $ "IEND"
 criticalChunks :: [Word32]
 criticalChunks = [pngIHDR, pngPLTE, pngIDAT, pngIEND]
 
-
 decodePNGChunks :: BL.ByteString -> [Chunk]
 decodePNGChunks buf
   | datType nxtC == pngIEND = nxtC : []
   | otherwise = nxtC : decodePNGChunks rest
   where (nxtC,rest) = decodeChunk buf
 
--- x	the byte being filtered;
--- a	the byte corresponding to x in the pixel immediately before the pixel 
+-- x    the byte being filtered;
+-- a    the byte corresponding to x in the pixel immediately before the pixel 
 --      containing x (or the byte immediately before x, when the bit depth is 
 --      less than 8);
--- b	the byte corresponding to x in the previous scanline;
--- c	the byte corresponding to b in the pixel immediately before the pixel 
+-- b    the byte corresponding to x in the previous scanline;
+-- c    the byte corresponding to b in the pixel immediately before the pixel 
 --      containing b (or the byte immediately before b, when the bit depth is 
 --      less than 8).
 
--- 0	None	Filt(x) = Orig(x)	
+-- 0    None    Filt(x) = Orig(x)   
 --              Recon(x) = Filt(x)
--- 1	Sub	    Filt(x) = Orig(x) - Orig(a)	
+-- 1    Sub     Filt(x) = Orig(x) - Orig(a) 
 --              Recon(x) = Filt(x) + Recon(a)
--- 2	Up	    Filt(x) = Orig(x) - Orig(b)	
+-- 2    Up      Filt(x) = Orig(x) - Orig(b) 
 --              Recon(x) = Filt(x) + Recon(b)
--- 3	Average	Filt(x) = Orig(x) - floor((Orig(a) + Orig(b)) / 2)	
+-- 3    Average Filt(x) = Orig(x) - floor((Orig(a) + Orig(b)) / 2)  
 --              Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2)
--- 4	Paeth	Filt(x) = Orig(x) - PaethPredictor(Orig(a), Orig(b), Orig(c))	
+-- 4    Paeth   Filt(x) = Orig(x) - PaethPredictor(Orig(a), Orig(b), Orig(c))   
 --              Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c))
 -- assume colourType 2 right now
-reconstruct :: [Word8] -> [[Word8]] -> [[Word8]]
-reconstruct ms wss = reverse $ foldl' (flip defilt) [] $ zip ms wss
+-- reconstruct with stepsize, filter methods, scanlines
+reconstruct :: Int -> [Word8] -> [[Word8]] -> [[Word8]]
+reconstruct s ms wss = reverse $ foldl' (flip defilt) [] $ zip ms wss
     where
+        zeroes = take s $ repeat 0
         defilt :: (Word8,[Word8]) -> [[Word8]] -> [[Word8]]
         defilt (0,c) rs = c:rs
-        defilt (1,c) rs = let r = take 3 c ++ zipWith (+) (drop 3 c) r in r:rs
+        defilt (1,c) rs = let r = take s c ++ zipWith (+) (drop s c) r in r:rs
         defilt (2,c) rs = zipWith (+) c (head rs) : rs
         defilt (3,c) rs = r:rs
             where 
                 r = front ++ back
-                (f,b) = splitAt 3 c
-                front = zipWith (+) f $ zipWith avg [0,0,0] (take 3 (head rs))
-                back = zipWith (+) b $ zipWith avg r (drop 3 (head rs))
+                (f,b) = splitAt s c
+                front = zipWith (+) f $ zipWith avg zeroes (take s (head rs))
+                back = zipWith (+) b $ zipWith avg r (drop s (head rs))
                 avg :: Word8 -> Word8 -> Word8
                 avg a b = fromIntegral $ (a' + b') `div` 2
                     where a' = fromIntegral a :: Int
@@ -144,10 +143,10 @@ reconstruct ms wss = reverse $ foldl' (flip defilt) [] $ zip ms wss
         defilt (4,c) rs = r:rs
             where
                 r = front ++ back
-                (f,b) = splitAt 3 c
+                (f,b) = splitAt s c
                 front = zipWith (+) f $ 
-                            zipWith3 paeth [0,0,0] (take 3 (head rs)) [0,0,0]
-                back = zipWith (+) b $ zipWith3 paeth r (drop 3 (head rs)) (head rs)
+                            zipWith3 paeth zeroes (take s (head rs)) zeroes
+                back = zipWith (+) b $ zipWith3 paeth r (drop s (head rs)) (head rs)
                 paeth :: Word8 -> Word8 -> Word8 -> Word8
                 paeth a b c
                   | pa <= pb && pa <= pc = a
@@ -161,21 +160,23 @@ reconstruct ms wss = reverse $ foldl' (flip defilt) [] $ zip ms wss
 getScanlines :: PNG -> ([Word8],[[Word8]])
 getScanlines xs = (frst,scnd)
     where
-        w = fromIntegral . (+1) . (*3) . width . pngInfoHeader $ xs
+        step = case colourType . pngInfoHeader $ xs of
+                2 -> 3
+                6 -> 4
+                _ -> error "Unhandled image type"
+        w = fromIntegral . (+1) . (*step) . width . pngInfoHeader $ xs
         h = fromIntegral . height . pngInfoHeader $ xs
         frst = [BL.head $ BL.drop (w*x) $ pngImageData xs | x <- [0..h-1]]
-        scnd = [BL.unpack . BL.tail . BL.take w . BL.drop (w*x) $ pngImageData xs | x <- [0..h-1]]
+        scnd = [BL.unpack . BL.tail . BL.take w . BL.drop (w*x) $ 
+                    pngImageData xs | x <- [0..h-1]]
 
 data PNG = PNG {
         pngFileHeader :: PNGFileHeader,
         pngInfoHeader :: IHDR,
         pngImageData :: BL.ByteString }
 
--- deinterlace :: IHDR -> BL.ByteString -> BL.ByteString
--- deinterlace = 
-
-readPNG :: BL.ByteString -> PNG
-readPNG buf = PNG {
+parsePNGbin :: BL.ByteString -> PNG
+parsePNGbin buf = PNG {
         pngFileHeader = decode fileHead,
         pngInfoHeader = decode $ chunkData $ chunks!!0, -- IHDR is first
         pngImageData = Z.decompress . BL.concat . map chunkData . 
@@ -183,4 +184,16 @@ readPNG buf = PNG {
     where
         (fileHead,rest) = BL.splitAt (fromIntegral sizePNGFileHeader) buf
         chunks = decodePNGChunks rest
+
+readPNG :: BL.ByteString -> PNG
+readPNG buf = PNG {
+        pngFileHeader = pngFileHeader tmp,
+        pngInfoHeader = pngInfoHeader tmp,
+        pngImageData = BL.pack . concat . uncurry (reconstruct s) . getScanlines $ tmp }
+    where
+        tmp = parsePNGbin buf
+        s = case colourType . pngInfoHeader $ tmp of
+               2 -> 3
+               6 -> 4
+               _ -> error "Unhandled image type"
 
