@@ -1,7 +1,8 @@
-
--- temporrary imports
-import Data.Array
-import ColorFormats
+module JPEG (
+    decodeJPEG,
+    readJPEG,
+    readBlocks,
+    ) where
 
 import Util (groupN, duplicateIdxs, roll, toTuple, zip2D3)
 import HuffmanTree (HuffmanTree, buildHuffmanTree, huffmanTreeLookup)
@@ -103,17 +104,17 @@ readSegments buf
   | otherwise = readSegments $ BL.dropWhile (/= 0xff) $ BL.tail buf 
   where marker = runGet getWord16be buf
 
-dcValue :: [Word8] -> Int
-dcValue []  = 0
-dcValue arr = if head arr == 1 then roll arr 
-                               else negate . roll . invert $ arr
+coeffCode :: [Word8] -> Int
+coeffCode []  = 0
+coeffCode arr = if head arr == 1 then roll arr 
+                                 else negate . roll . invert $ arr
     where
         invert = map (\x -> 1 - x)
 
 decodeDCValue :: HuffmanTree -> [Word8] -> (Int,[Word8])
 decodeDCValue hf xs = let (sz, rst) = huffmanTreeLookup hf xs 
                           y = fromIntegral sz 
-                     in (dcValue $ take y rst, drop y rst)
+                     in (coeffCode $ take y rst, drop y rst)
 
 decodeACValues :: HuffmanTree -> [Word8] -> ([Int], [Word8])
 decodeACValues hf xs = let (ac, rest) = rec xs [] 63
@@ -122,11 +123,10 @@ decodeACValues hf xs = let (ac, rest) = rec xs [] 63
         rec :: [Word8] -> [[Int]] -> Int -> ([[Int]], [Word8])
         rec ys acc 0 = (acc, ys)
         rec ys acc n
-          -- | trace ("rec2: " ++ show n ++ " " ++ show inf ++ " " ++ show run ++ " " ++ show sz ++ " " ++ show acc) False = undefined
-          -- | n < 0 = error "Ya done fucked up"
+          -- | trace ("rec: " ++ show acc ++ " " ++ show numBits ++ " " ++ show sz) False = undefined
           | run == 0 && sz == 0 = ((take n $ repeat 0) : acc, rst)
           | run == 15 && sz == 0 = rec rst ((take 16 $ (repeat 0)) : acc) (n - 16)
-          | otherwise = rec cont ([roll numBits] : (take run $ repeat 0) : acc) (n - (run + 1))
+          | otherwise = rec cont ([coeffCode numBits] : (take run $ repeat 0) : acc) (n - (run + 1))
           where (inf, rst) = huffmanTreeLookup hf ys
                 (run, sz) = (fromIntegral $ inf `shift` (-4), fromIntegral $ inf .&. 0xF)
                 (numBits, cont) = splitAt sz rst
@@ -134,52 +134,43 @@ decodeACValues hf xs = let (ac, rest) = rec xs [] 63
 roundUp8 :: Int -> Int
 roundUp8 x = 1 + (x - 1) `div` 8
 
-decodeJPEG :: BL.ByteString -> [([[Int]],[[Int]],[[Int]])]
-decodeJPEG buf = accum (toBits . imageData $ jpeg) [] blockCnt [0,0,0]
+readBlocks :: JPEG -> [([[Int]],[[Int]],[[Int]])]
+readBlocks jpeg = accum (toBits . imageData $ jpeg) [] blockCnt [0,0,0]
     where 
-        jpeg = readJPEG buf
         blockCnt = 
             let blocksX = roundUp8 . fromIntegral . sofWidth . infoHeader $ jpeg
                 blocksY = roundUp8 . fromIntegral . sofHeight . infoHeader $ jpeg
             in blocksX * blocksY :: Int
 
+        qnts = map (\c -> fromJust $ M.lookup (num c) $ quantTables jpeg) [0..2]
+            where num c = fromIntegral . fcQuantNum . (!!c) . sofComps . infoHeader $ jpeg
         accum :: [Word8] -> [([[Int]],[[Int]],[[Int]])] -> Int -> [Int]
                   -> [([[Int]],[[Int]],[[Int]])]
-        accum buf acc 0 _ = reverse acc
-        accum buf acc n xs = accum rst (nxt:acc) (n-1) [a!!0!!0,b!!0!!0,c!!0!!0]
-          where (hr, rst) = rec 0 [] buf xs
-                nxt@(a,b,c) = toTuple hr
+        accum _ acc 0 _ = reverse acc
+        accum buf acc n xs = accum rst (nxt:acc) (n-1) [a!!0,b!!0,c!!0]
+          where (hr@[a,b,c], rst) = rec 0 [] buf xs
+                nxt = toTuple $ map (\(i,m) -> D.decode (qnts!!i) m) $ zip [0..] hr
 
-        rec :: Int -> [[[Int]]] -> [Word8] -> [Int]
-               -> ([[[Int]]], [Word8])
+        rec :: Int -> [[Int]] -> [Word8] -> [Int]
+               -> ([[Int]], [Word8])
         rec 3 acc stm _ = (reverse acc, stm)
-        rec c acc stm (y:ys) = rec (c+1) (n:acc) rst ys
+        rec c acc stm (y:ys) = rec (c+1) (((dc+y):ac):acc) rst ys
             where
-                n = D.decode tab ((dc+y):ac)
                 (_,x) = (sosComponents . scanInfo $ jpeg) !! c
                 (acT,dcT) = (fromIntegral $ x .&. 0xF, fromIntegral $ x `shiftR` 4)
                 (dc,tmp) = decodeDCValue (fromJust $ M.lookup (0,dcT) (huffmanTrees jpeg)) stm
                 (ac,rst) = decodeACValues (fromJust $ M.lookup (1,acT) (huffmanTrees jpeg)) tmp
-                Just tab = M.lookup (fromIntegral $ fcQuantNum ((sofComps . infoHeader $ jpeg) !! c)) (quantTables jpeg)
 
-charIntensity :: Array Int Char
-charIntensity = listArray (0,9) " .,:;xo%#@"
-
-pixelToChar :: Word8 -> Char
-pixelToChar x = charIntensity!(fromIntegral (255-x)*10`div`256)
-
-tmpOut :: BL.ByteString -> [[Char]]
-tmpOut buf = map (map (pixelToChar . fromIntegral)) lums
+decodeJPEG :: BL.ByteString -> [[(Int,Int,Int)]]
+decodeJPEG buf = map (take w) . take h . foldr (++) [] $ map merge arr
     where
-        jpeg = readJPEG buf
-        w = fromIntegral . sofWidth . infoHeader $ jpeg
-        h = fromIntegral . sofHeight . infoHeader $ jpeg
+        j = readJPEG buf
+        w = fromIntegral . sofWidth . infoHeader $ j
+        h = fromIntegral . sofHeight . infoHeader $ j
         blocksX = roundUp8 w
         blocksY = roundUp8 h
         arr = groupN blocksX . take (blocksX * blocksY) . cycle . 
-                map (\(a,_,_) -> a) $ decodeJPEG buf
-
-        lums = map (take w) . take h . foldr (++) [] $ map merge arr
+                map ((\(a,b,c) -> zip2D3 a b c)) $ readBlocks j
         merge :: [[[a]]] -> [[a]]
         merge xs = [foldr (++) [] $ map (!!i) xs | i <- [0..7]]
 
