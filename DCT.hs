@@ -1,6 +1,11 @@
 module DCT (
-    decode
+    decode,
+    zigzag,
+    unzigzag,
     ) where
+
+import Util (zip2D, zip2D3)
+import Data.List (transpose)
 
 shift :: Int -> [[Int]] -> [[Int]]
 shift s = map (map (\x -> x - s))
@@ -22,21 +27,8 @@ dctConversion g = [[transform u v | u <- [0..7]] | v <- [0..7]]
                                 b' = fromIntegral b in
                                 cos ((2 * a' + 1) * b' * pi / 16)
 
-quantMatrix :: [[Double]]
-quantMatrix = [[16, 11, 10, 16, 24, 40, 51, 61],
-               [12, 12, 14, 19, 26, 58, 60, 55],
-               [14, 13, 16, 24, 40, 57, 69, 56],
-               [14, 17, 22, 29, 51, 87, 80, 62],
-               [18, 22, 37, 56, 68, 109, 103, 77],
-               [24, 35, 55, 64, 81, 104, 113, 92],
-               [49, 64, 78, 87, 103, 121, 130, 101],
-               [72, 92, 95, 98, 112, 100, 103, 99]]
-
-zip2D :: [[a]] -> [[b]] -> [[(a,b)]]
-zip2D xss yss = map (\(a,b) -> zip a b) (zip xss yss)
-
-quantize :: [[Double]] -> [[Int]]
-quantize = map (map freqDim) . zip2D quantMatrix
+quantize :: [[Double]] -> [[Double]] -> [[Int]]
+quantize qnt = map (map freqDim) . zip2D qnt
     where freqDim (q,g) = round (g/q)
 
 zigzag :: [[a]] -> [a]
@@ -57,10 +49,11 @@ huffman b = (dc, compress 1 0 ac)
           where bitSz = (+1) . floor . log2 . fromIntegral . abs
                 log2 v = log v / log 2
 
-encode :: [[Int]] -> (Int,[((Int,Int),Maybe Int)])
-encode = huffman . zigzag . quantize . dctConversion . shift 128
+encode :: [[Double]] -> [[Int]] -> (Int,[((Int,Int),Maybe Int)])
+encode qnt = huffman . zigzag . quantize qnt . dctConversion . shift 128
 
-unzigzag :: [Int] -> [[Int]]
+-- we care about this part for decoding
+unzigzag :: [a] -> [[a]]
 unzigzag arr = let frnt = build arr
                    back = build $ reverse arr in
                 map (\(a,b) -> a ++ tail b) (zip frnt (reverse (map reverse back)))
@@ -72,9 +65,21 @@ unzigzag arr = let frnt = build arr
                   prev = s * (s + 1) `div` 2
                   diff = s - y
 
-revQuantize :: [[Double]] -> [[Int]] -> [[Int]]
+revQuantize :: [[Double]] -> [[Int]] -> [[Double]]
 revQuantize qnt = map (map freqInc) . zip2D qnt
-    where freqInc (q,g) = round q * g -- q should round to correct int
+    where freqInc (q,g) = q * (fromIntegral g)
+
+mmult :: Num a => [[a]] -> [[a]] -> [[a]]
+mmult a b = [[sum $ zipWith (*) ar bc | bc <- transpose b] | ar <- a]
+
+dctmat :: [[Double]]
+dctmat = [[t i j | j <- [0..7]] | i <- [0..7]]
+    where t i j
+            | i == 0 = 1 / sqrt 8
+            | otherwise = 1 / 2 * cos ((2 * j + 1) * i * pi / 16)
+
+idct :: [[Double]]
+idct = transpose dctmat
 
 dctInverse :: [[Int]] -> [[Int]]
 dctInverse f = [[round (transform x y) | x <- [0..7]] | y <- [0..7]]
@@ -90,10 +95,7 @@ dctInverse f = [[round (transform x y) | x <- [0..7]] | y <- [0..7]]
                                 cos ((2 * a' + 1) * b' * pi / 16)
 
 decode :: [[Double]] -> [Int] -> [[Int]]
-decode qnt = shift (-128) . dctInverse . revQuantize qnt . unzigzag
-
-avgError :: [[Int]] -> [[Int]] -> Double
-avgError xss yss = fromIntegral tot / 64
-    where diff = map (map (\(a,b) -> a-b)) (zip2D xss yss)
-          tot = sum $ map abs $ foldr (++) [] diff
+decode qnt arr = shift (-128) $ map (map round) d
+    where m = revQuantize qnt . unzigzag $ arr
+          d = mmult dctmat $ mmult m idct
 
