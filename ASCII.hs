@@ -8,6 +8,8 @@ module ASCII (
 import Util
 import BMP
 import PNG
+import JPEG (decodeJPEG)
+import ColorFormats
 import qualified Data.ByteString.Lazy as BL
 import Data.Array
 import Data.Binary (Word8)
@@ -41,4 +43,13 @@ convertPNGFileToASCII :: FilePath -> FilePath -> IO ()
 convertPNGFileToASCII inFile outFile = do
     file <- BL.readFile inFile
     writeFile outFile $ unlines . pngToASCII . readPNG $ file
+
+pixelsChromaToASCII :: [[(Int,Int,Int)]] -> [[Char]]
+pixelsChromaToASCII = map (map (pixelToChar . fromIntegral . rgbToGray . yCbCrToRGB))
+
+convertJPEGFileToASCII :: FilePath -> FilePath -> IO ()
+convertJPEGFileToASCII inFile outFile = do
+    file <- BL.readFile inFile
+    writeFile outFile $ unlines . pixelsChromaToASCII . decodeJPEG $ file
+
 
