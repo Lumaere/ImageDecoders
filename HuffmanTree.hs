@@ -27,6 +27,7 @@ huffmanTreeLookup (Leaf x) xs
   | otherwise   = (fromJust x, xs)
 huffmanTreeLookup (Branch l r) (x:xs) = if x == 0 then huffmanTreeLookup l xs 
                                                   else huffmanTreeLookup r xs
+huffmanTreeLookup _ [] = error "Corrupted data stream"
 
 
 
