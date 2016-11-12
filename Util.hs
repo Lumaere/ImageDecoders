@@ -8,6 +8,8 @@ module Util (
     duplicateIdxs,
     roll,
     toTuple,
+    zip2D,
+    zip2D3,
     ) where
 
 import Data.Char (ord)
@@ -54,4 +56,9 @@ toTuple :: [a] -> (a,a,a)
 toTuple (g:h:c:[]) = (g,h,c)
 toTuple _ = error "Bad tuple call"
 
+zip2D :: [[a]] -> [[b]] -> [[(a,b)]]
+zip2D xss yss = map (\(a,b) -> zip a b) (zip xss yss)
+
+zip2D3 :: [[a]] -> [[b]] -> [[c]] -> [[(a,b,c)]]
+zip2D3 xss yss zss = map (\(a,b,c) -> zip3 a b c) (zip3 xss yss zss)
 
