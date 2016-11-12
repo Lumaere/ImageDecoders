@@ -18,12 +18,13 @@ import Data.Binary (Word8)
 charIntensity :: Array Int Char
 charIntensity = listArray (0,9) " .,:;xo%#@"
 
-pixelToChar :: Word8 -> Char
-pixelToChar x = charIntensity!(fromIntegral (255-x)*10`div`256)
+pixelToChar :: Int -> Char
+pixelToChar x = charIntensity!(fromIntegral (255-y)*10`div`256)
+    where y = if x > 255 then 255 else if x < 0 then 0 else x
 
 -- NOTE: currently assumes that colortable is filled 0-255
 bmpToASCII :: BMP -> [[Char]]
-bmpToASCII bmp = groupN w . reverse . map pixelToChar .  BL.unpack . bmpImageData $ bmp
+bmpToASCII bmp = groupN w . reverse . map (pixelToChar . fromIntegral) .  BL.unpack . bmpImageData $ bmp
     where (w,_) = dimensionsBMP bmp
 
 convertBMPFileToASCII :: FilePath -> FilePath -> IO ()
@@ -37,7 +38,7 @@ pngToASCII png = let s = case colourType . pngInfoHeader $ png of
                             6 -> 4
                             _ -> error "Unhandled image type"
                      w = fromIntegral . width . pngInfoHeader $ png
-                 in groupN w . map pixelToChar . everyN s . BL.unpack . pngImageData $ png
+                 in groupN w . map (pixelToChar . fromIntegral) . everyN s . BL.unpack . pngImageData $ png
 
 convertPNGFileToASCII :: FilePath -> FilePath -> IO ()
 convertPNGFileToASCII inFile outFile = do
@@ -45,7 +46,7 @@ convertPNGFileToASCII inFile outFile = do
     writeFile outFile $ unlines . pngToASCII . readPNG $ file
 
 pixelsChromaToASCII :: [[(Int,Int,Int)]] -> [[Char]]
-pixelsChromaToASCII = map (map (pixelToChar . fromIntegral . rgbToGray . yCbCrToRGB))
+pixelsChromaToASCII = map (map (pixelToChar . rgbToGray . yCbCrToRGB))
 
 convertJPEGFileToASCII :: FilePath -> FilePath -> IO ()
 convertJPEGFileToASCII inFile outFile = do
