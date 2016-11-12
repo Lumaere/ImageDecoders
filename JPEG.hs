@@ -1,7 +1,7 @@
 module JPEG (
     decodeJPEG,
     readJPEG,
-    readBlocks,
+    readMCUs,
     ) where
 
 import Util (groupN, duplicateIdxs, roll, toTuple, zip2D3)
@@ -13,22 +13,25 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary (decode, Word16, Word8)
 import Data.Binary.Get (getWord16be, runGet)
 import Data.Bits ((.&.), (.|.), shift, shiftR)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust,isNothing)
+import Data.List (elemIndex)
 import GHC.Int (Int64)
 import Control.DeepSeq (deepseq)
 import Debug.Trace
 
 toBits :: BL.ByteString -> [Word8]
-toBits = foldr (++) [] . map (\x -> split x) . removeStuffed . BL.unpack
+toBits = removeStuffed . BL.unpack
     where 
         split x = [shift x y .&. 0x01 | y <- [-7..0]]
         removeStuffed :: [Word8] -> [Word8]
         removeStuffed [] = []
         removeStuffed [x] = [x]
         removeStuffed (x:y:xs)
-          | x == 0xff && y == 0x00 = x : removeStuffed xs
-          | x == 0xff = if y == 0xD9 then [] else error "Bad data stream"
-          | otherwise = x : removeStuffed (y:xs)
+          | x == 0xff && y == 0x00 = split x ++ removeStuffed xs
+          | x == 0xff && y == 0xD9 = [] 
+          | x == 0xff = if y <= 0xD7 && y >= 0xD0 then x:y:removeStuffed xs 
+                                                  else error "Bad data stream"
+          | otherwise = split x ++ removeStuffed (y:xs)
 
 data JPEG = JPEG {
         fileHeader :: JPEGFileHeader,
@@ -123,7 +126,6 @@ decodeACValues hf xs = let (ac, rest) = rec xs [] 63
         rec :: [Word8] -> [[Int]] -> Int -> ([[Int]], [Word8])
         rec ys acc 0 = (acc, ys)
         rec ys acc n
-          -- | trace ("rec: " ++ show acc ++ " " ++ show numBits ++ " " ++ show sz) False = undefined
           | run == 0 && sz == 0 = ((take n $ repeat 0) : acc, rst)
           | run == 15 && sz == 0 = rec rst ((take 16 $ (repeat 0)) : acc) (n - 16)
           | otherwise = rec cont ([coeffCode numBits] : (take run $ repeat 0) : acc) (n - (run + 1))
@@ -131,11 +133,24 @@ decodeACValues hf xs = let (ac, rest) = rec xs [] 63
                 (run, sz) = (fromIntegral $ inf `shift` (-4), fromIntegral $ inf .&. 0xF)
                 (numBits, cont) = splitAt sz rst
 
+decodeMCU :: JPEG -> [Word8] -> [Int] -> ([[Int]], [Word8])
+decodeMCU j buf pred = let (v,rst) = rec 0 buf []
+                       in (map (\(a,b) -> (a+head b):tail b) $ zip pred v, rst)
+    where
+        rec :: Int -> [Word8] -> [[Int]] -> ([[Int]], [Word8])
+        rec 3 stm acc = (reverse acc, stm)
+        rec c stm acc = rec (c+1) rst ((dc:ac):acc) 
+            where
+                (_,x) = (sosComponents . scanInfo $ j) !! c
+                (acT,dcT) = (fromIntegral $ x .&. 0xF, fromIntegral $ x `shiftR` 4)
+                (dc,tmp) = decodeDCValue (fromJust $ M.lookup (0,dcT) (huffmanTrees j)) stm
+                (ac,rst) = decodeACValues (fromJust $ M.lookup (1,acT) (huffmanTrees j)) tmp
+
 roundUp8 :: Int -> Int
 roundUp8 x = 1 + (x - 1) `div` 8
 
-readBlocks :: JPEG -> [([[Int]],[[Int]],[[Int]])]
-readBlocks jpeg = accum (toBits . imageData $ jpeg) [] blockCnt [0,0,0]
+readMCUs :: JPEG -> [([[Int]],[[Int]],[[Int]])]
+readMCUs jpeg = accum (toBits . imageData $ jpeg) [] blockCnt [0,0,0]
     where 
         blockCnt = 
             let blocksX = roundUp8 . fromIntegral . sofWidth . infoHeader $ jpeg
@@ -148,18 +163,9 @@ readBlocks jpeg = accum (toBits . imageData $ jpeg) [] blockCnt [0,0,0]
                   -> [([[Int]],[[Int]],[[Int]])]
         accum _ acc 0 _ = reverse acc
         accum buf acc n xs = accum rst (nxt:acc) (n-1) [a!!0,b!!0,c!!0]
-          where (hr@[a,b,c], rst) = rec 0 [] buf xs
-                nxt = toTuple $ map (\(i,m) -> D.decode (qnts!!i) m) $ zip [0..] hr
-
-        rec :: Int -> [[Int]] -> [Word8] -> [Int]
-               -> ([[Int]], [Word8])
-        rec 3 acc stm _ = (reverse acc, stm)
-        rec c acc stm (y:ys) = rec (c+1) (((dc+y):ac):acc) rst ys
-            where
-                (_,x) = (sosComponents . scanInfo $ jpeg) !! c
-                (acT,dcT) = (fromIntegral $ x .&. 0xF, fromIntegral $ x `shiftR` 4)
-                (dc,tmp) = decodeDCValue (fromJust $ M.lookup (0,dcT) (huffmanTrees jpeg)) stm
-                (ac,rst) = decodeACValues (fromJust $ M.lookup (1,acT) (huffmanTrees jpeg)) tmp
+          where 
+            (hr@[a,b,c], rst) = decodeMCU jpeg buf xs
+            nxt = toTuple $ map (\(i,m) -> D.decode (qnts!!i) m) $ zip [0..] hr
 
 decodeJPEG :: BL.ByteString -> [[(Int,Int,Int)]]
 decodeJPEG buf = map (take w) . take h . foldr (++) [] $ map merge arr
@@ -170,7 +176,7 @@ decodeJPEG buf = map (take w) . take h . foldr (++) [] $ map merge arr
         blocksX = roundUp8 w
         blocksY = roundUp8 h
         arr = groupN blocksX . take (blocksX * blocksY) . cycle . 
-                map ((\(a,b,c) -> zip2D3 a b c)) $ readBlocks j
+                map ((\(a,b,c) -> zip2D3 a b c)) $ readMCUs j
         merge :: [[[a]]] -> [[a]]
         merge xs = [foldr (++) [] $ map (!!i) xs | i <- [0..7]]
 
