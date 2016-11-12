@@ -1,6 +1,9 @@
 
+-- temporrary imports
 import Data.Array
-import Util (groupN, duplicateIdxs, roll, toTuple)
+import ColorFormats
+
+import Util (groupN, duplicateIdxs, roll, toTuple, zip2D3)
 import HuffmanTree (HuffmanTree, buildHuffmanTree, huffmanTreeLookup)
 import JPEGMetaData
 import qualified DCT as D (decode)
@@ -9,10 +12,10 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary (decode, Word16, Word8)
 import Data.Binary.Get (getWord16be, runGet)
 import Data.Bits ((.&.), (.|.), shift, shiftR)
-import Data.List (foldl')
 import Data.Maybe (fromJust)
-import Debug.Trace
 import GHC.Int (Int64)
+import Control.DeepSeq (deepseq)
+import Debug.Trace
 
 toBits :: BL.ByteString -> [Word8]
 toBits = foldr (++) [] . map (\x -> split x) . removeStuffed . BL.unpack
@@ -36,8 +39,8 @@ data JPEG = JPEG {
 
 data Segment = Seg1 JPEGFileHeader
              | Seg2 FrameInfo
-             | Seg3 QuantTable
-             | Seg4 HuffmanTable 
+             | Seg3 QuantTables
+             | Seg4 HuffmanTables
              | Seg5 ScanMarker
              | Seg6 BL.ByteString
              deriving Show
@@ -52,17 +55,29 @@ readJPEG buf = foldr updateJPEG initial $ readSegments buf
             scanInfo = emptyScanMarker,
             imageData = BL.empty }
 
+insertQuant :: M.Map Int [[Double]] -> [QuantTable] -> M.Map Int [[Double]]
+insertQuant mp [] = mp
+insertQuant mp (x:xs) = insertQuant (M.insert n (table x) mp) xs
+    where n = fromIntegral $ qtNum x
+
+insertHuff :: M.Map (Int,Int) HuffmanTree -> [HuffmanTable] -> M.Map (Int,Int) HuffmanTree
+insertHuff mp [] = mp
+insertHuff mp (x:xs) = insertHuff (M.insert (t,n) lvl mp) xs
+    where t = fromIntegral $ htType x
+          n = fromIntegral $ htNum x
+          lvl = buildHuffmanTree $ zip (duplicateIdxs (map fromIntegral . htNumSymbols $ x)) 
+                                       (map fromIntegral . htSymbols $ x)
+
 updateJPEG :: Segment -> JPEG -> JPEG
 updateJPEG seg state = case seg of
     Seg1 x -> state { fileHeader = x }
     Seg2 x -> state { infoHeader = x }
-    Seg3 x -> let n = fromIntegral $ qtNum x 
-              in state { quantTables = M.insert n (table x) (quantTables state) }
-    Seg4 x -> let n = fromIntegral $ htNum x
-                  t = fromIntegral $ htType x
-                  lvls = zip (map fromIntegral $ duplicateIdxs (htNumSymbols x)) 
-                             (map fromIntegral $ htSymbols x)
-              in state { huffmanTrees = M.insert (t,n) (buildHuffmanTree lvls) (huffmanTrees state) }
+    Seg3 x -> let cur = quantTables state
+                  nxt = qtTables x
+              in state { quantTables = insertQuant cur nxt }
+    Seg4 x -> let cur = huffmanTrees state
+                  nxt = htTables x
+              in state { huffmanTrees = insertHuff cur nxt }
     Seg5 x -> state { scanInfo = x }
     Seg6 x -> state { imageData = x }
     
@@ -84,7 +99,8 @@ readSegments buf
   | marker == 0xFFDB = let x = Seg3 $ decode buf in x : readSegments (BL.drop (getLength x) buf)
   | marker == 0xFFC4 = let x = Seg4 $ decode buf in x : readSegments (BL.drop (getLength x) buf)
   | marker == 0xFFDA = let x = Seg5 $ decode buf in x : Seg6 (BL.drop (getLength x) buf) : []
-  | otherwise = error "Unhandled segment type"
+    -- want to throw error but temporary workaround
+  | otherwise = readSegments $ BL.dropWhile (/= 0xff) $ BL.tail buf 
   where marker = runGet getWord16be buf
 
 dcValue :: [Word8] -> Int
@@ -106,8 +122,10 @@ decodeACValues hf xs = let (ac, rest) = rec xs [] 63
         rec :: [Word8] -> [[Int]] -> Int -> ([[Int]], [Word8])
         rec ys acc 0 = (acc, ys)
         rec ys acc n
+          -- | trace ("rec2: " ++ show n ++ " " ++ show inf ++ " " ++ show run ++ " " ++ show sz ++ " " ++ show acc) False = undefined
+          -- | n < 0 = error "Ya done fucked up"
           | run == 0 && sz == 0 = ((take n $ repeat 0) : acc, rst)
-          | run == 15 && sz == 0 = rec rst (take 16 $ repeat 0 : acc) (n - 16)
+          | run == 15 && sz == 0 = rec rst ((take 16 $ (repeat 0)) : acc) (n - 16)
           | otherwise = rec cont ([roll numBits] : (take run $ repeat 0) : acc) (n - (run + 1))
           where (inf, rst) = huffmanTreeLookup hf ys
                 (run, sz) = (fromIntegral $ inf `shift` (-4), fromIntegral $ inf .&. 0xF)
@@ -117,17 +135,27 @@ roundUp8 :: Int -> Int
 roundUp8 x = 1 + (x - 1) `div` 8
 
 decodeJPEG :: BL.ByteString -> [([[Int]],[[Int]],[[Int]])]
-decodeJPEG buf = map toTuple [rec 0 [] . toBits . imageData $ jpeg | x <- [1..blockCnt]]
+decodeJPEG buf = accum (toBits . imageData $ jpeg) [] blockCnt [0,0,0]
     where 
         jpeg = readJPEG buf
         blockCnt = 
             let blocksX = roundUp8 . fromIntegral . sofWidth . infoHeader $ jpeg
                 blocksY = roundUp8 . fromIntegral . sofHeight . infoHeader $ jpeg
             in blocksX * blocksY :: Int
-        rec :: Int -> [[[Int]]] -> [Word8] -> [[[Int]]]
-        rec 3 acc _   = reverse acc
-        rec c acc stm = rec (c+1) (D.decode tab (dc:ac) : acc) rst
+
+        accum :: [Word8] -> [([[Int]],[[Int]],[[Int]])] -> Int -> [Int]
+                  -> [([[Int]],[[Int]],[[Int]])]
+        accum buf acc 0 _ = reverse acc
+        accum buf acc n xs = accum rst (nxt:acc) (n-1) [a!!0!!0,b!!0!!0,c!!0!!0]
+          where (hr, rst) = rec 0 [] buf xs
+                nxt@(a,b,c) = toTuple hr
+
+        rec :: Int -> [[[Int]]] -> [Word8] -> [Int]
+               -> ([[[Int]]], [Word8])
+        rec 3 acc stm _ = (reverse acc, stm)
+        rec c acc stm (y:ys) = rec (c+1) (n:acc) rst ys
             where
+                n = D.decode tab ((dc+y):ac)
                 (_,x) = (sosComponents . scanInfo $ jpeg) !! c
                 (acT,dcT) = (fromIntegral $ x .&. 0xF, fromIntegral $ x `shiftR` 4)
                 (dc,tmp) = decodeDCValue (fromJust $ M.lookup (0,dcT) (huffmanTrees jpeg)) stm
