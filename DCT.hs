@@ -94,8 +94,11 @@ dctInverse f = [[round (transform x y) | x <- [0..7]] | y <- [0..7]]
                                 b' = fromIntegral b in
                                 cos ((2 * a' + 1) * b' * pi / 16)
 
+-- decode :: [[Double]] -> [Int] -> [[Int]]
+-- decode qnt = shift (-128) . dctInverse . revQuantize qnt . unzigzag
+
 decode :: [[Double]] -> [Int] -> [[Int]]
 decode qnt arr = shift (-128) $ map (map round) d
     where m = revQuantize qnt . unzigzag $ arr
-          d = mmult dctmat $ mmult m idct
+          d = mmult idct $ mmult m dctmat
 
