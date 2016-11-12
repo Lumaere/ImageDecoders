@@ -3,19 +3,23 @@ module JPEGMetaData (
     FrameComponent (..),
     FrameInfo (..),
     QuantTable (..),
+    QuantTables (..),
     HuffmanTable (..),
+    HuffmanTables (..),
     ScanMarker (..),
     emptyJPEGFileHeader,
     emptyFrameInfo,
     emptyScanMarker,
     ) where
 
+import qualified DCT as D (unzigzag, zigzag)
 import Util (getMany, putMany, groupN)
 import Data.Binary
 import Data.Binary.Get (getWord16be, getWord32be)
 import Data.Binary.Put (putWord16be, putWord32be)
 import Data.Bits ((.&.), (.|.), shift, shiftR)
 
+-- JPEG file header
 data JPEGFileHeader = JPEGFileHeader {
         hAPP0 :: Word16,
         hLength :: Word16,
@@ -29,9 +33,6 @@ data JPEGFileHeader = JPEGFileHeader {
 emptyJPEGFileHeader = JPEGFileHeader {
         hAPP0 = 0, hLength = 0, hIdentifer = 0, hVer = 0, hUnits = 0,
         hXdensity = 0, hYdensity = 0, hThumbnailWidth = 0, hThumbnailHeight = 0 }
-
-sizeJPEGFileHeader :: Int
-sizeJPEGFileHeader = 18
 
 instance Binary JPEGFileHeader where
     get = do
@@ -68,7 +69,7 @@ instance Binary JPEGFileHeader where
         putWord16be $ hYdensity header
         putWord8    $ hThumbnailWidth header
         putWord8    $ hThumbnailHeight header
-
+-- Frame Meta information
 data FrameComponent = FrameComponent {
         fcID :: Word8,
         fcVertHorz :: Word8,
@@ -122,59 +123,85 @@ instance Binary FrameInfo where
         putWord16be $ sofWidth header
         putWord8    $ sofCompNum header
         putMany     $ sofComps header
-
+-- Quantization Tables
 data QuantTable = QuantTable {
-        qtLength :: Word16,
         qtNum :: Word8,
         qtPrec :: Word8,
         table :: [[Double]] } deriving Show
 instance Binary QuantTable where
     get = do
-        _ <- getWord16be
-        len <- getWord16be
         info <- getWord8
         let prec = info .&. 0xF0
         arr <- getMany $ 64 * (fromIntegral prec + 1) :: Get [Word8]
         return QuantTable {
-            qtLength = len,
             qtNum = info .&. 0x0F,
             qtPrec = info .&. 0xF0,
-            table = groupN 8 . map fromIntegral $ arr }
+            table = D.unzigzag . map fromIntegral $ arr }
+    put qnt = do
+        putWord8 $ qtNum qnt .|. qtPrec qnt
+        putMany  $ (map round . D.zigzag . table $ qnt :: [Word8])
 
+data QuantTables = QuantTables {
+        qtLength :: Word16,
+        qtTables :: [QuantTable] } deriving Show
+instance Binary QuantTables where
+    get = do
+        _ <- getWord16be
+        len <- getWord16be
+        tabs <- getMany $ fromIntegral $ (len - 3) `div` 64
+        return QuantTables {
+            qtLength = len,
+            qtTables = tabs }
     put qnt = do
         putWord16be $ 0xFFDB
         putWord16be $ qtLength qnt
-        putWord8    $ qtNum qnt .|. qtPrec qnt
-        putMany     $ (map round . foldr (++) [] . table $ qnt :: [Word8])
-
+        putMany     $ qtTables qnt
+-- Huffman Tables
 data HuffmanTable = HuffmanTable {
-        htLength :: Word16,
         htNum :: Word8,
         htType :: Word8,
         htNumSymbols :: [Word8],
         htSymbols :: [Word8] } deriving Show
 instance Binary HuffmanTable where
     get = do
-        _ <- getWord16be
-        len <- getWord16be
         info <- getWord8
         cnts <- getMany 16 :: Get [Word8]
         let n = fromIntegral $ sum cnts
         arr <- getMany n
         return HuffmanTable {
-            htLength = len,
             htNum = info .&. 0xF,
             htType = shift info (-4),
             htNumSymbols = cnts,
             htSymbols = arr }
-
     put hft = do
-        putWord16be $ 0xFFC4
-        putWord16be $ htLength hft
         putWord8    $ shift (htType hft) 4 .|. htNum hft
         putMany     $ htNumSymbols hft
         putMany     $ htSymbols hft
 
+getHuff :: Int -> Get [HuffmanTable]
+getHuff n = rec [] n
+    where
+        rec xs 0 = return $ reverse xs
+        rec xs i = do x <- get
+                      let len = (+17) . sum . map fromIntegral $ htNumSymbols x
+                      x `seq` rec (x:xs) (i - len)
+
+data HuffmanTables = HuffmanTables {
+        htLength :: Word16,
+        htTables :: [HuffmanTable] } deriving Show
+instance Binary HuffmanTables where
+    get = do
+        _ <- getWord16be
+        len <- getWord16be
+        tab <- getHuff $ (fromIntegral len) - 2
+        return HuffmanTables {
+            htLength = len,
+            htTables = tab }
+    put hft = do
+        putWord16be $ 0xFFC4
+        putWord16be $ htLength hft
+        putMany     $ htTables hft
+-- Scan Marker
 data ScanMarker = ScanMarker {
         sosLength :: Word16,
         sosNumComp :: Word8,
