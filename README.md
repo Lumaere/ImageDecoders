@@ -1,0 +1,1 @@
+Really basic parser for JPEG, PNG, BMP file formats. Converts to ASCII art. Written entirely in Haskell and served largely as practice. Note: assumed very many things about format and does not support any special features.
